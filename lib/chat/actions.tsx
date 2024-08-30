@@ -35,6 +35,17 @@ import { saveChat } from '@/app/actions'
 import { SpinnerMessage, UserMessage } from '@/components/stocks/message'
 import { Chat, Message } from '@/lib/types'
 import { auth } from '@/auth'
+import { RateLimiterMemory } from 'rate-limiter-flexible'
+
+const rateLimiterUnauthenticated = new RateLimiterMemory({
+  points: 3, // 3 requests
+  duration: 3600, // per hour
+});
+
+const rateLimiterAuthenticated = new RateLimiterMemory({
+  points: 6, // 6 requests
+  duration: 3600, // per hour
+});
 
 async function confirmPurchase(symbol: string, price: number, amount: number) {
   'use server'
@@ -108,6 +119,20 @@ async function confirmPurchase(symbol: string, price: number, amount: number) {
 
 async function submitUserMessage(content: string) {
   'use server'
+
+  const session = await auth()
+  const isAuthenticated = session && session.user
+
+  try {
+    if (isAuthenticated && session && session.user) {
+      await rateLimiterAuthenticated.consume(session.user.id)
+    } else {
+      await rateLimiterUnauthenticated.consume('unauthenticated')
+    }
+  } catch (rateLimiterRes) {
+    // Handle rate limit exceeded
+    throw new Error('Rate limit exceeded. Please try again later.')
+  }
 
   const aiState = getMutableAIState<typeof AI>()
 
